@@ -1,0 +1,576 @@
+================================================================================
+UNIVERSITY CLASS ROUTINE VISION EXTRACTOR & TIMETABLE APPLICATION
+COMPLETE COMPREHENSIVE TECHNICAL & ARCHITECTURAL DOCUMENTATION
+================================================================================
+
+TABLE OF CONTENTS:
+--------------------------------------------------------------------------------
+1. PROJECT OVERVIEW & ARCHITECTURE
+2. TECHNOLOGY STACK & DEPENDENCIES
+3. MULTIMODAL AI VISION EXTRACTION PIPELINE
+   3.1 Vision Prompt & Rules
+   3.2 JSON Schema
+   3.3 API Request Structure & Processing
+4. DATA MODELS & ENTITIES
+   4.1 ClassSession
+   4.2 RoutineMetadata
+   4.3 RoutineModel
+5. SERVICES LAYER
+   5.1 GeminiVisionService
+   5.2 CalendarExportService
+   5.3 ExportHelper (Web & VM / Desktop)
+   5.4 StorageService
+   5.5 SampleRoutineData
+6. STATE MANAGEMENT (RoutineProvider)
+   6.1 State Variables & Getters
+   6.2 Dynamic Subgroup Alignment
+   6.3 Extraction, Mutation & Export Methods
+7. FRONTEND & UI COMPONENT BREAKDOWN
+   7.1 main.dart (App Entry Point & Home Screen)
+   7.2 app_theme.dart (Design System & Theming)
+   7.3 UploadZone (Image Upload, Progress & Demo Mode)
+   7.4 RoutineHeaderCard (Metadata, Stats & Image Inspector)
+   7.5 SubgroupFilterBar (Dynamic Subgroups, Search & View Switcher)
+   7.6 TimetableGridView (7-Day Schedule Grid & University Slots)
+   7.7 TimetableAgendaView (Chronological Daily Agenda)
+   7.8 SessionCard (Course Badges, Room, Faculty & Micro-interactions)
+   7.9 SessionDetailDialog (Add, Edit & Delete Modal)
+   7.10 ApiKeyDialog (Gemini API Configuration)
+8. AUTOMATED TESTING & VERIFICATION SUITE
+9. LOCAL EXECUTION & PRODUCTION BUILD GUIDE
+
+================================================================================
+1. PROJECT OVERVIEW & ARCHITECTURE
+================================================================================
+The University Class Routine Vision Extractor is a Flutter Web and Desktop 
+application designed to automate schedule management for university students. 
+
+Workflow:
+1. An image of a university class routine schedule (such as Daffodil International 
+   University's grid routine) is uploaded by the user or loaded from the demo mode.
+2. The image is encoded into base64 and sent to Google Gemini's Multimodal 
+   Vision models (e.g., gemini-2.5-flash or gemini-3.7-flash).
+3. The Gemini model extracts the grid structure, expands abbreviations, identifies 
+   weekday columns (Saturday through Friday), start/end times in 24-hour format, 
+   course codes, course titles, faculty initials, room locations, class types 
+   (lab vs theory), and section subgroups (e.g., A1/A2, D1/D2, or ALL).
+4. The extraction strictly obeys an enforced JSON schema via Gemini's native 
+   responseSchema API.
+5. The extracted routine is rendered into an interactive timetable with:
+   - Dynamic section/subgroup filter chips matching the uploaded routine 
+     (e.g., Group A1, Group A2 for Section A; Group D1, Group D2 for Section D).
+   - Real-time search across course codes, names, faculty, and room numbers.
+   - Dual view modes: Weekly 7-Day Timetable Grid and Daily Agenda List.
+   - Interactive zoomable image inspection comparing the extraction with the original.
+   - Full manual editability (add, edit, delete classes).
+   - Export to Google / Apple / Outlook Calendar (.ics) and formatted JSON.
+
+Architectural Pattern:
+- Model-View-Service-Provider (MVVM/Provider) with reactive ListenableBuilder.
+- Clean separation between pure business logic, AI network communication, local 
+  storage persistence, and responsive UI components.
+
+================================================================================
+2. TECHNOLOGY STACK & DEPENDENCIES
+================================================================================
+- Flutter Framework: Flutter 3.47+
+- Dart Language: Dart 3.13+
+- Target Platforms: Web (Chrome, Edge, Safari, Firefox), Windows Desktop.
+
+Dependencies (pubspec.yaml):
+1. flutter: Core UI and rendering engine.
+2. http (^1.6.0): Handles direct HTTP POST calls to the Google Generative 
+   Language REST endpoints.
+3. file_picker (^12.3.0): Cross-platform file selector supporting JPG, PNG, WEBP.
+4. google_fonts (^8.2.1): Clean typography using the "Plus Jakarta Sans" font family.
+5. shared_preferences (^2.5.5): Local persistent storage for API keys, model 
+   choice, saved routine data, filter preferences, and dark mode.
+6. intl (^0.20.3): Date and time formatting.
+7. web (^1.1.1): Browser DOM interaction for client-side calendar (.ics) and 
+   JSON file downloads.
+
+================================================================================
+3. MULTIMODAL AI VISION EXTRACTION PIPELINE
+================================================================================
+
+3.1 Vision Prompt & Rules:
+--------------------------
+System Instruction:
+"You are a university schedule extraction assistant. Analyze the uploaded class 
+routine image and extract all scheduled class sessions into structured JSON.
+
+Rules:
+1. Examine the grid structure where columns represent weekdays (Saturday through 
+   Friday) and rows represent time slots.
+2. For each occupied cell, extract:
+   - day: Full weekday name (e.g., 'Sunday', 'Wednesday').
+   - startTime and endTime: 24-hour format (HH:mm), e.g., '10:00' and '11:30'.
+   - courseTitle: Full name of the course. Expand obvious abbreviations or ellipses 
+     (e.g., 'Software Engineerin...' -> 'Software Engineering', 
+     'Artificial Intellig...' -> 'Artificial Intelligence').
+   - courseCode: The alphanumeric code (e.g., 'SE331', 'SE334').
+   - facultyInitial: Instructor short code/initial (e.g., 'SSA', 'JA', 'MSA').
+   - room: Room identifier (e.g., 'AB3-106', '711B', 'ONLINE').
+   - type: 'lab' or 'theory'.
+   - subgroup: 
+       * Match the section letter extracted from the routine metadata. For example:
+         - If Section is A, extract 'A1' for Lab 1 / Lab A1, and 'A2' for Lab 2 / Lab A2.
+         - If Section is D, extract 'D1' for Lab 1 / Lab D1, and 'D2' for Lab 2 / Lab D2.
+         - For any Section X, use 'X1' for group 1 and 'X2' for group 2.
+       * 'ALL' if it is a general theory lecture or applies to the whole section.
+3. Extract metadata: batch, section, department, and effectiveDate.
+4. Ignore empty grid slots.
+5. Return ONLY valid JSON matching the schema below."
+
+3.2 JSON Schema:
+----------------
+{
+  "type": "OBJECT",
+  "required": ["metadata", "schedule"],
+  "properties": {
+    "metadata": {
+      "type": "OBJECT",
+      "required": ["batch", "section", "department"],
+      "properties": {
+        "batch": {"type": "STRING"},
+        "section": {"type": "STRING"},
+        "department": {"type": "STRING"},
+        "effectiveDate": {"type": "STRING"}
+      }
+    },
+    "schedule": {
+      "type": "ARRAY",
+      "items": {
+        "type": "OBJECT",
+        "required": [
+          "day",
+          "startTime",
+          "endTime",
+          "courseTitle",
+          "courseCode",
+          "type",
+          "subgroup",
+          "room"
+        ],
+        "properties": {
+          "day": {
+            "type": "STRING",
+            "enum": [
+              "Saturday",
+              "Sunday",
+              "Monday",
+              "Tuesday",
+              "Wednesday",
+              "Thursday",
+              "Friday"
+            ]
+          },
+          "startTime": {"type": "STRING"},
+          "endTime": {"type": "STRING"},
+          "courseTitle": {"type": "STRING"},
+          "courseCode": {"type": "STRING"},
+          "facultyInitial": {"type": "STRING"},
+          "room": {"type": "STRING"},
+          "type": {
+            "type": "STRING",
+            "enum": ["theory", "lab"]
+          },
+          "subgroup": {
+            "type": "STRING",
+            "description": "Subgroup identifier aligned with section: 'A1', 'A2', 'B1', 'B2', 'D1', 'D2', etc., or 'ALL' for theory/whole section."
+          }
+        }
+      }
+    }
+  }
+}
+
+3.3 API Request Structure & Processing:
+---------------------------------------
+Endpoint:
+POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}
+
+Headers: Content-Type: application/json
+Body Parameters:
+- systemInstruction: Exact prompt and rules.
+- contents: User text request + inlineData with mimeType ('image/jpeg', 'image/png') 
+  and base64-encoded image payload.
+- generationConfig:
+  - responseMimeType: "application/json"
+  - responseSchema: Strict schema matching the above definition.
+  - temperature: 0.1 (low temperature for deterministic, factual OCR extraction).
+
+The service handles markdown code fence stripping (`json ... `) if present, 
+deserializes the JSON map, normalizes subgroup indicators according to the extracted 
+section, and builds a strongly typed RoutineModel.
+
+================================================================================
+4. DATA MODELS & ENTITIES
+================================================================================
+
+4.1 ClassSession (lib/models/class_session.dart):
+------------------------------------------------
+Represents an individual scheduled class or laboratory session.
+
+Properties:
+- id (String): Unique identifier, generated from `${day}_${startTime}_${courseCode}_$subgroup`.
+- day (String): Weekday ('Saturday' through 'Friday').
+- startTime (String): 24-hour format (HH:mm), normalized (e.g. "08:30", "10:00").
+- endTime (String): 24-hour format (HH:mm), e.g. "11:30", "13:00".
+- courseTitle (String): Full course title (e.g. "Software Engineering", "Artificial Intelligence").
+- courseCode (String): Alphanumeric code (e.g. "SE331", "SE334", "STA101").
+- facultyInitial (String?): Instructor code (e.g. "SSA", "JA", "MSA", "IAT").
+- room (String): Room name or number (e.g. "AB3-106", "711B", "ONLINE", "903").
+- type (String): 'theory' or 'lab'.
+- subgroup (String): 'ALL', 'A1', 'A2', 'D1', 'D2', etc.
+
+Key Methods & Getters:
+- isLab (bool): Returns true if type is 'lab'.
+- isTheory (bool): Returns true if type is 'theory'.
+- matchesSubgroup(String filter):
+  - Returns true if filter is 'ALL'.
+  - Returns isTheory if filter is 'THEORY'.
+  - Returns isLab if filter is 'LAB'.
+  - If filter is a group (e.g., 'A1' or 'D1'):
+    - Returns true if subgroup is 'ALL' (theory lectures apply to all subgroups).
+    - Returns true if subgroup equals filter.
+    - Suffix matching: matches if numerical suffix matches (e.g., 'A1' matches '1' or 'D1').
+- startMinutes (int): Minutes from midnight (e.g., 10:00 = 600) for grid positioning.
+- endMinutes (int): Minutes from midnight (e.g., 11:30 = 690).
+- durationMinutes (int): Session duration in minutes.
+- courseColor (Color): Deterministic hash-based accent color mapped to the courseCode.
+- subgroupColor (Color): Distinct color chip (Indigo for ALL, Sky Blue for Group 1, Teal for Group 2).
+- fromJson(Map, {String? section}): Normalizes subgroup to match the routine's section letter.
+- toJson(): Serializes session matching schema.
+- copyWith(): Immutably updates fields for editing.
+
+4.2 RoutineMetadata (lib/models/routine_model.dart):
+---------------------------------------------------
+Represents header metadata extracted from the routine sheet.
+
+Properties:
+- batch (String): Academic batch number (e.g. "42", "44").
+- section (String): Section letter (e.g. "A", "D").
+- department (String): Department name (e.g. "Department of Software Engineering").
+- effectiveDate (String): Date the schedule is effective from (e.g. "12 September 2026").
+
+Methods: fromJson, toJson, copyWith.
+
+4.3 RoutineModel (lib/models/routine_model.dart):
+------------------------------------------------
+The root container holding the entire routine dataset.
+
+Properties:
+- metadata (RoutineMetadata): Header metadata.
+- schedule (List<ClassSession>): List of all scheduled class sessions.
+
+Static Constants:
+- weekdays: ['Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].
+- standardTimeSlots: ['08:30 - 10:00', '10:00 - 11:30', '11:30 - 13:00', '13:00 - 14:30', 
+  '14:30 - 16:00', '16:00 - 17:30', '17:30 - 19:00'].
+
+Key Methods & Getters:
+- availableSubgroups (List<String>):
+  Inspects the schedule and returns all unique non-'ALL' subgroup tags (e.g., ['A1', 'A2'] or ['D1', 'D2']).
+  If no explicit subgroups exist in the schedule, falls back to ['${section}1', '${section}2'].
+- getSessionsForDay(String day, {subgroupFilter, search}):
+  Filters sessions by weekday, subgroup, and search query, sorted chronologically by startMinutes.
+- getFilteredSchedule({subgroupFilter, search}):
+  Returns all sessions matching active subgroup and search criteria.
+- uniqueCourses (Set<String>): Set of formatted 'Code: Title' strings.
+- uniqueFaculty (Set<String>): Set of unique instructor initials.
+- uniqueRooms (Set<String>): Set of unique room strings.
+- totalSessions, totalLabs, totalTheories: Numeric statistical counts.
+- fromJson(Map): Parses metadata first, then passes metadata.section to each ClassSession.fromJson.
+- toJson(): Converts full routine to standard JSON map.
+
+================================================================================
+5. SERVICES LAYER
+================================================================================
+
+5.1 GeminiVisionService (lib/services/gemini_vision_service.dart):
+-----------------------------------------------------------------
+Orchestrates communication with the Google Gemini Multimodal Vision API.
+
+Methods:
+- extractRoutineFromImage({imageBytes, apiKey, mimeType, model}):
+  1. Validates API key presence.
+  2. Converts imageBytes to base64.
+  3. Builds HTTP POST request with systemInstruction, prompt, inline image data, 
+     and responseSchema.
+  4. Parses the JSON response from candidates[0].content.parts[0].text.
+  5. Strips markdown fences and returns a structured RoutineModel.
+
+5.2 CalendarExportService (lib/services/calendar_export_service.dart):
+---------------------------------------------------------------------
+Generates standard iCalendar (.ics) files and manages file downloads.
+
+Methods:
+- generateICalendar(RoutineModel routine, {subgroupFilter = 'ALL'}):
+  1. Generates RFC-5545 compliant VCALENDAR header with timezone Asia/Dhaka.
+  2. Filters schedule by the selected subgroup filter.
+  3. Maps weekdays to iCal BYDAY codes (SU, MO, TU, WE, TH, SA, FR).
+  4. Creates VEVENT objects with:
+     - SUMMARY: [LAB/THEORY] CourseCode: CourseTitle
+     - LOCATION: Room number
+     - DESCRIPTION: Faculty, room, group details
+     - RRULE:FREQ=WEEKLY;BYDAY=...;UNTIL=20271231T235959Z (recurring weekly timetable events)
+  5. Returns the complete .ics string.
+- downloadFile(content, fileName, mimeType):
+  Invokes downloadWebFile() via the conditional platform export helper.
+
+5.3 ExportHelper (lib/services/export_helper.dart):
+---------------------------------------------------
+Cross-platform conditional download bridge.
+- export_helper.dart: Declares conditional import.
+- export_helper_web.dart: On web, encodes content into a data: URI, creates a 
+  hidden HTMLAnchorElement, sets download filename, appends, triggers click(), 
+  and removes the anchor.
+- export_helper_stub.dart: Safe fallback on non-web VM environments (ensuring 
+  flutter test can execute without web-specific DOM dependencies).
+
+5.4 StorageService (lib/services/storage_service.dart):
+------------------------------------------------------
+Persistent local storage using SharedPreferences.
+
+Methods:
+- saveApiKey(String key) / getApiKey(): Stores and retrieves Gemini API key.
+- saveModel(String model) / getModel(): Stores selected Gemini model (default: gemini-2.5-flash).
+- saveRoutine(RoutineModel) / loadSavedRoutine(): Serializes and restores routine JSON.
+- saveSubgroupFilter(String) / getSubgroupFilter(): Persists active filter tab.
+- saveDarkMode(bool) / getDarkMode(): Persists theme preference.
+
+5.5 SampleRoutineData (lib/data/sample_routine_data.dart):
+---------------------------------------------------------
+Pre-bundled reference dataset representing the DIU Department of Software 
+Engineering Section D, Batch 42 routine image.
+- Contains all 14 reference sessions (Sunday through Thursday).
+- Asset path: 'assets/sample_routine.jpg'.
+- Enables 1-click instantaneous demo mode without requiring an API key.
+
+================================================================================
+6. STATE MANAGEMENT (RoutineProvider)
+================================================================================
+Located at lib/providers/routine_provider.dart. Extends ChangeNotifier.
+
+6.1 State Variables & Getters:
+------------------------------
+- _routine (RoutineModel?): The currently active routine.
+- _isLoading (bool): True during image upload or model inference.
+- _statusMessage (String): Real-time progress status for UI indicators.
+- _errorMessage (String?): Error message if extraction or API fails.
+- _subgroupFilter (String): Active subgroup filter ('ALL', 'A1', 'A2', 'D1', 'D2', 'THEORY', 'LAB').
+- _searchQuery (String): Search keyword entered by user.
+- _viewMode (String): 'grid' (weekly table) or 'agenda' (day list).
+- _selectedDay (String?): Active weekday filter in agenda mode (null = all days).
+- _isDarkMode (bool): True if dark theme is active.
+- _apiKey (String): Configured Gemini API key.
+- _selectedModel (String): Selected model identifier.
+- _routineImageBytes (Uint8List?): Image bytes of uploaded or sample routine.
+- _routineImageName (String?): Name of current routine image.
+- hasApiKey (bool): Getter checking if API key is not empty.
+
+6.2 Dynamic Subgroup Alignment:
+-------------------------------
+- isFilterActive(String key):
+  Checks if filter tab matches the active subgroup, including numerical suffix 
+  matching (e.g., if filter is 'A1' and active routine changes, matches '1').
+- _alignSubgroupFilterWithRoutine():
+  When a routine is loaded or uploaded, if the active filter belongs to an older 
+  section (e.g. 'D1') and the new routine is Section A with groups ['A1', 'A2'], 
+  it automatically shifts _subgroupFilter to 'A1'.
+
+6.3 Extraction, Mutation & Export Methods:
+------------------------------------------
+- init(): Loads preferences, API key, and restores saved or sample routine.
+- setApiKey(String key), setSelectedModel(String model).
+- setSubgroupFilter(String filter), setSearchQuery(String query), setViewMode(String mode).
+- setSelectedDay(String? day), toggleDarkMode(), clearError().
+- loadSampleRoutine(): Loads sample asset image and pre-extracted routine data.
+- extractFromImageBytes({bytes, filename, mimeType}):
+  Triggers Gemini Vision extraction, updates animated status messages, aligns 
+  subgroups, saves to local storage, and handles errors gracefully.
+- updateSession(ClassSession updated): Edits a session in the schedule and saves.
+- addSession(ClassSession newSession): Adds a new session to the schedule and saves.
+- deleteSession(String id): Removes a session from the schedule and saves.
+- exportJson(): Formats routine JSON with indentation and triggers browser download.
+- exportICalendar(): Generates .ics file for active subgroup and triggers download.
+
+================================================================================
+7. FRONTEND & UI COMPONENT BREAKDOWN
+================================================================================
+
+7.1 main.dart (App Entry Point & Home Screen):
+----------------------------------------------
+- main(): Initializes Flutter bindings, instantiates RoutineProvider, calls init(), 
+  and launches ClassRoutineApp.
+- ClassRoutineApp: Wraps the application in a ListenableBuilder connected to 
+  RoutineProvider, toggling light/dark themes dynamically.
+- RoutineHomeScreen:
+  - AppBar:
+    - App branding logo and title ("University Routine Extractor").
+    - Model badge chip displaying active Gemini model (e.g., gemini-2.5-flash).
+    - "Configure API Key" / "API Key Set" button with state indicator icon.
+    - Theme switcher button (sun / moon icon).
+  - Body:
+    - Constrained container (max width 1400px) centered for desktop and web.
+    - Renders UploadZone, RoutineHeaderCard, SubgroupFilterBar, and either 
+      TimetableGridView or TimetableAgendaView based on viewMode.
+
+7.2 app_theme.dart (Design System & Theming):
+---------------------------------------------
+- Colors:
+  - primaryTeal: Color(0xFF0D9488) (University branding teal)
+  - accentCyan: Color(0xFF06B6D4)
+  - coralAccent: Color(0xFFF97316)
+  - labTagColor: Color(0xFFE11D48) (Rose red badge for labs)
+  - theoryTagColor: Color(0xFF059669) (Emerald green badge for theory)
+  - groupAllColor: Color(0xFF6366F1) (Indigo for whole-section classes)
+  - groupD1Color: Color(0xFF0284C7) (Sky blue for Group 1)
+  - groupD2Color: Color(0xFF0D9488) (Teal for Group 2)
+- Typography: Plus Jakarta Sans via GoogleFonts.
+- Custom card themes, input decorations, and dark/light ColorSchemes.
+
+7.3 UploadZone (lib/widgets/upload_zone.dart):
+---------------------------------------------
+- Top error banner displaying extraction errors with a "Set API Key" quick button.
+- Upload container with:
+  - Idle state: Cloud upload icon, descriptive text, "Try Demo Routine" button, 
+    and "Upload Routine Image" button.
+  - File picker: Opens file picker for PNG, JPG, WEBP.
+  - Loading state: Animated circular progress spinner, real-time status message, 
+    and active model indicator during extraction.
+
+7.4 RoutineHeaderCard (lib/widgets/routine_header_card.dart):
+-------------------------------------------------------------
+- Department title and graduation cap icon with glowing background.
+- Metadata badges: Section (e.g. Section: A), Batch (e.g. Batch: 44), Effective Date.
+- Statistical summary row: Total Sessions, Theory Classes, Lab Classes, Faculty Count.
+- Action Buttons:
+  - "Compare Image": Opens a modal with InteractiveViewer allowing users to pan 
+    and zoom into the uploaded routine image to verify OCR accuracy.
+  - "Add Class": Opens SessionDetailDialog to add a new class manually.
+  - "Export": PopupMenuButton with:
+    - Export to Google/Apple Calendar (.ics)
+    - Export Structured JSON (.json)
+
+7.5 SubgroupFilterBar (lib/widgets/subgroup_filter_bar.dart):
+-------------------------------------------------------------
+- Dynamic Subgroup Filter Chips:
+  - 'All Classes'
+  - Dynamically generated chips for each subgroup detected (e.g. 'Group A1 (Labs + Theory)', 
+    'Group A2 (Labs + Theory)' when Section A is active; 'Group D1', 'Group D2' for Section D).
+  - 'Theory Only'
+  - 'Labs Only'
+- View Mode Toggle: Switches between Grid view and Agenda view.
+- Real-time Search Field: Filters by course code, title, teacher initials, or room.
+
+7.6 TimetableGridView (lib/widgets/timetable_grid_view.dart):
+-------------------------------------------------------------
+- Horizontal scroll container with min-width 1100px.
+- 7 Weekday Columns: Saturday, Sunday, Monday, Tuesday, Wednesday, Thursday, Friday.
+  - Friday is highlighted with distinctive red weekend styling.
+  - Column headers show class count badges for each day.
+- 7 University Time Slot Rows:
+  - 08:30 - 10:00
+  - 10:00 - 11:30
+  - 11:30 - 13:00
+  - 13:00 - 14:30
+  - 14:30 - 16:00
+  - 16:00 - 17:30
+  - 17:30 - 19:00
+- Cell Rendering:
+  - Matches sessions starting within the slot window.
+  - Multiple simultaneous sessions (e.g., D1 and D2 labs scheduled at the same time) 
+    are stacked cleanly.
+  - Empty cells display a minimalist container with a subtle '+' icon that allows 
+    instant class addition pre-filled with that day and time.
+
+7.7 TimetableAgendaView (lib/widgets/timetable_agenda_view.dart):
+-----------------------------------------------------------------
+- Day selector chips at top: 'All Days', 'Saturday', 'Sunday', etc.
+- Groups classes into separate cards per day, sorted chronologically.
+- Ideal for mobile viewports and daily glance.
+
+7.8 SessionCard (lib/widgets/session_card.dart):
+-----------------------------------------------
+- Interactive card with hover elevation and border highlighting.
+- Top row: Course Code (bold accent), Subgroup chip ('A1', 'A2', 'ALL'), Type chip ('LAB' / 'THEORY').
+- Course title (max 2 lines).
+- Bottom row: Faculty initial chip, Room pill (highlighted purple for 'ONLINE', grey/slate for offline), 
+  and time range.
+- Tap gesture: Opens SessionDetailDialog for editing.
+
+7.9 SessionDetailDialog (lib/widgets/session_detail_dialog.dart):
+-----------------------------------------------------------------
+- Form dialog for adding or editing a class session.
+- Fields:
+  - Day of week (dropdown)
+  - Class type ('Theory Lecture' or 'Lab Session')
+  - Subgroup dropdown: Dynamically lists 'ALL (Whole Section)' and the routine's 
+    actual section groups (e.g. 'Group A1 Only', 'Group A2 Only').
+  - Course Code & Course Title
+  - Start Time & End Time (24h HH:mm format)
+  - Faculty Initial & Room
+- Actions: 'Delete' (for existing sessions), 'Cancel', and 'Save Changes' / 'Add Session'.
+
+7.10 ApiKeyDialog (lib/widgets/api_key_dialog.dart):
+----------------------------------------------------
+- Modal allowing users to input and manage their Google Gemini API Key.
+- Password visibility toggle (eye icon).
+- Multimodal model selector dropdown (gemini-2.5-flash, gemini-3.7-flash, gemini-2.5-pro, etc.).
+- Privacy notice stating keys are stored locally in the browser and never transmitted 
+  elsewhere except the Google Generative Language API.
+
+================================================================================
+8. AUTOMATED TESTING & VERIFICATION SUITE
+================================================================================
+Test file: test/routine_model_test.dart (6 comprehensive test suites):
+1. 'Sample routine has correct metadata and session count':
+   Validates batch 42, section D, Software Engineering, 14 sessions, 8 labs, 6 theories.
+2. 'Section A routine dynamically yields A1 and A2 subgroups and filters correctly':
+   Validates that Section A (Batch 44) normalizes subgroups to A1 and A2, and filters 
+   correctly when A1 or A2 is selected.
+3. 'Subgroup filtering works accurately':
+   Validates ALL (14 sessions), D1 (10 sessions), D2 (10 sessions), THEORY (6), LAB (8).
+4. 'Search filter works for course code, title, and faculty':
+   Validates search queries 'SE331', 'SSA', and 'ONLINE'.
+5. 'JSON serialization & deserialization adheres to schema':
+   Ensures round-trip fromJson/toJson preserving all metadata and session properties.
+6. 'Calendar export generates valid VCALENDAR with VEVENT items':
+   Validates RFC-5545 calendar syntax, RRULE weekly recurrence, and event descriptions.
+
+Test execution command:
+flutter test test/routine_model_test.dart  -> Result: All 6 tests passed!
+Static analysis:
+flutter analyze -> Result: No issues found! (0 errors, 0 warnings).
+
+================================================================================
+9. LOCAL EXECUTION & PRODUCTION BUILD GUIDE
+================================================================================
+1. Clone Repository:
+   git clone https://github.com/Fahimulislamfahim/Class-Routine-App.git
+   cd Class-Routine-App
+
+2. Install Dependencies:
+   flutter pub get
+
+3. Run Tests:
+   flutter test
+
+4. Run Locally on Chrome (Development Server):
+   flutter run -d chrome
+
+5. Run Locally on Windows Desktop:
+   flutter run -d windows
+
+6. Build Production Web Bundle:
+   flutter build web
+   (Artifacts generated in build/web/)
+
+7. Serve Static Web Build:
+   powershell -ExecutionPolicy Bypass -File .\serve_web.ps1
+   (Serves live at http://localhost:8080/)
+================================================================================
+END OF DOCUMENTATION
+================================================================================
