@@ -28,6 +28,10 @@ class ClassSession {
 
   bool get isLab => type.toLowerCase() == 'lab';
   bool get isTheory => type.toLowerCase() == 'theory';
+  bool get isOnline => room.toLowerCase().contains('online') || room.toLowerCase().contains('meet');
+  String get roomNo => room;
+  String get teacherName => facultyInitial ?? '';
+  String get timeSlot => formattedTimeRange;
 
   /// Check if this session matches the selected subgroup filter
   bool matchesSubgroup(String filter) {

@@ -13,6 +13,10 @@ class RoutineMetadata {
     this.effectiveDate = '',
   });
 
+  String get semester => 'Fall';
+  int get year => 2026;
+  String get campus => 'Permanent Campus';
+
   factory RoutineMetadata.fromJson(Map<String, dynamic> json) {
     return RoutineMetadata(
       batch: (json['batch'] ?? 'N/A').toString().trim(),
@@ -110,8 +114,9 @@ class RoutineModel {
   }
 
   /// All filtered sessions
-  List<ClassSession> getFilteredSchedule({String subgroupFilter = 'ALL', String search = ''}) {
+  List<ClassSession> getFilteredSchedule({String? day, String subgroupFilter = 'ALL', String search = ''}) {
     return schedule.where((session) {
+      if (day != null && session.day.toLowerCase() != day.toLowerCase()) return false;
       if (!session.matchesSubgroup(subgroupFilter)) return false;
       if (search.isNotEmpty) {
         final query = search.toLowerCase();

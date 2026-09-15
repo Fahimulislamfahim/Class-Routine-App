@@ -21,27 +21,23 @@ class SessionCard extends StatefulWidget {
 class _SessionCardState extends State<SessionCard> {
   bool _isHovered = false;
 
-  Color _getSubgroupColor(String group) {
-    switch (group.toUpperCase()) {
-      case 'D1':
-        return AppTheme.groupD1Color;
-      case 'D2':
-        return AppTheme.groupD2Color;
-      case 'ALL':
-      default:
-        return AppTheme.groupAllColor;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final session = widget.session;
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    final baseColor = session.courseColor;
-    final groupColor = _getSubgroupColor(session.subgroup);
     final isLab = session.isLab;
+    final isRemote = session.isOnline;
+
+    // Color coordination based on Stitch AetherSchedule tokens:
+    // Lab: Tertiary (Laser Rose / Magenta #FBABFF)
+    // Theory: Secondary Container (Electric Cyan #00F2D1)
+    // Hybrid/Tutorial: Primary (Holographic Indigo #C0C1FF)
+    final Color accentColor = isLab
+        ? AppTheme.tertiary
+        : (isRemote ? AppTheme.primary : AppTheme.secondaryContainer);
+
+    final Color glowColor = isLab
+        ? AppTheme.tertiaryContainer
+        : (isRemote ? AppTheme.primaryContainer : AppTheme.secondaryFixedDim);
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
@@ -50,188 +46,294 @@ class _SessionCardState extends State<SessionCard> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
+          duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
-          margin: const EdgeInsets.symmetric(vertical: 3, horizontal: 2),
-          padding: EdgeInsets.all(widget.isCompact ? 8 : 10),
+          margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
           decoration: BoxDecoration(
-            color: isDark
-                ? (_isHovered ? const Color(0xFF26334D) : const Color(0xFF1E293B))
-                : (_isHovered ? Colors.white : const Color(0xFFFBFDFF)),
-            borderRadius: BorderRadius.circular(12),
+            color: AppTheme.surfaceContainerLow.withAlpha(_isHovered ? 230 : 190),
+            borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: _isHovered
-                  ? baseColor.withAlpha(200)
-                  : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
-              width: _isHovered ? 1.5 : 1,
+                  ? accentColor.withAlpha(160)
+                  : (isLab ? AppTheme.tertiaryContainer.withAlpha(70) : AppTheme.outlineVariant.withAlpha(50)),
+              width: _isHovered ? 1.4 : 1.0,
             ),
-            boxShadow: _isHovered
-                ? [
-                    BoxShadow(
-                      color: baseColor.withAlpha(35),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ]
-                : [
-                    BoxShadow(
-                      color: Colors.black.withAlpha(8),
-                      blurRadius: 3,
-                      offset: const Offset(0, 1),
-                    ),
-                  ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Top Row: Code + Subgroup + Type Badge
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: baseColor.withAlpha(isDark ? 50 : 30),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: baseColor.withAlpha(120), width: 0.8),
-                    ),
-                    child: Text(
-                      session.courseCode,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        color: isDark ? baseColor.withAlpha(240) : baseColor,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                  ),
-                  const Spacer(),
-                  // Group Tag
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: groupColor.withAlpha(30),
-                      borderRadius: BorderRadius.circular(5),
-                    ),
-                    child: Text(
-                      session.subgroup,
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: groupColor,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  // Lab / Theory Tag
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: (isLab ? AppTheme.labTagColor : AppTheme.theoryTagColor).withAlpha(25),
-                      borderRadius: BorderRadius.circular(5),
-                    ),
-                    child: Text(
-                      isLab ? 'LAB' : 'THEORY',
-                      style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w800,
-                        color: isLab ? AppTheme.labTagColor : AppTheme.theoryTagColor,
-                      ),
-                    ),
-                  ),
-                ],
+            boxShadow: [
+              BoxShadow(
+                color: _isHovered ? glowColor.withAlpha(70) : glowColor.withAlpha(20),
+                blurRadius: _isHovered ? 24 : 14,
+                spreadRadius: _isHovered ? 0 : -2,
+                offset: const Offset(0, 4),
               ),
-              const SizedBox(height: 6),
-
-              // Course Title
-              Text(
-                session.courseTitle,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: widget.isCompact ? 11 : 12,
-                  fontWeight: FontWeight.w600,
-                  height: 1.25,
-                  color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF1E293B),
+              BoxShadow(
+                color: Colors.black.withAlpha(140),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Stack(
+            children: [
+              // Specular Vertical Neon Accent Bar
+              Positioned(
+                left: 0,
+                top: 14,
+                bottom: 14,
+                child: Container(
+                  width: 5,
+                  decoration: BoxDecoration(
+                    color: accentColor,
+                    borderRadius: const BorderRadius.horizontal(right: Radius.circular(6)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: accentColor.withAlpha(220),
+                        blurRadius: 10,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              const SizedBox(height: 6),
 
-              // Bottom Row: Faculty & Room & Time
-              Wrap(
-                spacing: 6,
-                runSpacing: 4,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  // Faculty chip
-                  if (session.facultyInitial != null && session.facultyInitial!.isNotEmpty)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.person, size: 11, color: isDark ? Colors.grey[400] : Colors.grey[600]),
-                          const SizedBox(width: 2),
-                          Text(
-                            session.facultyInitial!,
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              color: isDark ? Colors.grey[300] : Colors.grey[800],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  // Room chip
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: session.room.toUpperCase() == 'ONLINE'
-                          ? Colors.purple.withAlpha(30)
-                          : (isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
+              // Card Content
+              Padding(
+                padding: EdgeInsets.fromLTRB(widget.isCompact ? 16 : 20, 14, 14, 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Row 1: Time, Type Chip, Subgroup, Room Badge
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Icon(
-                          session.room.toUpperCase() == 'ONLINE' ? Icons.videocam : Icons.location_on,
-                          size: 11,
-                          color: session.room.toUpperCase() == 'ONLINE'
-                              ? Colors.purpleAccent
-                              : (isDark ? Colors.grey[400] : Colors.grey[600]),
+                        Row(
+                          children: [
+                            Text(
+                              session.timeSlot,
+                              style: TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: widget.isCompact ? 11 : 13,
+                                fontWeight: FontWeight.w700,
+                                color: accentColor,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: accentColor.withAlpha(35),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: accentColor.withAlpha(90), width: 0.8),
+                              ),
+                              child: Text(
+                                isLab ? 'Lab Block' : (isRemote ? 'Hybrid / Remote' : 'Theory'),
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: accentColor,
+                                ),
+                              ),
+                            ),
+                            if (session.subgroup != 'ALL') ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.surfaceContainerHighest.withAlpha(150),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  'Group ${session.subgroup}',
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppTheme.onSurface,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
-                        const SizedBox(width: 2),
-                        Text(
-                          session.room,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: session.room.toUpperCase() == 'ONLINE'
-                                ? Colors.purple
-                                : (isDark ? Colors.grey[300] : Colors.grey[800]),
+
+                        // Room badge pill
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppTheme.surfaceContainerHigh.withAlpha(220),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: accentColor.withAlpha(80)),
+                            boxShadow: [
+                              BoxShadow(
+                                color: accentColor.withAlpha(40),
+                                blurRadius: 8,
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                isLab ? Icons.desktop_windows_outlined : Icons.meeting_room_outlined,
+                                size: 12,
+                                color: accentColor,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                session.roomNo.isNotEmpty ? session.roomNo : 'ONLINE',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppTheme.onSurface,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
                     ),
-                  ),
 
-                  // Time chip
-                  Text(
-                    session.formattedTimeRange,
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: isDark ? Colors.grey[400] : Colors.grey[500],
-                      fontWeight: FontWeight.w500,
+                    const SizedBox(height: 10),
+
+                    // Row 2: Course Title + Code
+                    Text(
+                      '${session.courseCode}: ${session.courseTitle}',
+                      style: TextStyle(
+                        fontSize: widget.isCompact ? 14 : 16,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.onSurface,
+                        letterSpacing: -0.2,
+                        height: 1.25,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-                ],
+
+                    const SizedBox(height: 6),
+
+                    // Row 3: Instructor info
+                    Row(
+                      children: [
+                        Container(
+                          width: 22,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: accentColor.withAlpha(35),
+                          ),
+                          child: Icon(
+                            isLab ? Icons.psychology_outlined : Icons.school_outlined,
+                            size: 13,
+                            color: accentColor,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            session.teacherName.isNotEmpty ? session.teacherName : 'Faculty Member',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: AppTheme.onSurfaceVariant,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    // Optional Lab HUD sub-strip if lab session
+                    if (isLab && !widget.isCompact) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: AppTheme.surfaceContainerLowest.withAlpha(160),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppTheme.outlineVariant.withAlpha(40)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.terminal, size: 14, color: AppTheme.secondaryContainer),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Hands-on Lab Task / Code',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppTheme.onSurface.withAlpha(220),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppTheme.secondaryContainer.withAlpha(30),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Text(
+                                'Inspect',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.secondaryContainer,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    if (!widget.isCompact) ...[
+                      const SizedBox(height: 10),
+                      // Meta footer row
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                width: 5,
+                                height: 5,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: AppTheme.outlineVariant,
+                                ),
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                session.day,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppTheme.outline,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Row(
+                            children: [
+                              Text(
+                                'Tap for details',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: accentColor,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(width: 2),
+                              Icon(Icons.arrow_forward_ios, size: 10, color: accentColor),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ],
           ),

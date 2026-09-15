@@ -8,11 +8,12 @@ void main() {
     await provider.loadSampleRoutine();
 
     await tester.pumpWidget(ClassRoutineApp(provider: provider));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
 
-    expect(find.text('University Routine Extractor'), findsOneWidget);
-    expect(find.text('Department of Software Engineering'), findsOneWidget);
-    expect(find.text('Section: D'), findsOneWidget);
-    expect(find.text('Batch: 42'), findsOneWidget);
+    expect(find.text('Interactive HUD'), findsOneWidget);
+    expect(find.text('AI Vision Active'), findsOneWidget);
+    expect(find.text('Routine'), findsOneWidget);
+    expect(find.text('Matrix'), findsOneWidget);
+    expect(find.text('Export'), findsOneWidget);
   });
 }
